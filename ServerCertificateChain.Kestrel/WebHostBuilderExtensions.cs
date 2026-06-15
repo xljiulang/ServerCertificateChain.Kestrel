@@ -9,10 +9,8 @@ using Microsoft.Extensions.Primitives;
 using ServerCertificateChain.Kestrel;
 using System;
 using System.Collections.Frozen;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net.Security;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography.X509Certificates;
 
 namespace Microsoft.AspNetCore.Hosting
@@ -22,15 +20,6 @@ namespace Microsoft.AspNetCore.Hosting
     /// </summary>
     public static partial class WebHostBuilderExtensions
     {
-        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_HttpsDefaults")]
-        private static extern Action<HttpsConnectionAdapterOptions> GetHttpsDefaults(this KestrelServerOptions kestrel);
-
-        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EndpointDefaults")]
-        private static extern Action<ListenOptions> GetEndpointDefaults(this KestrelServerOptions kestrel);
-
-        [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EndpointConfigurations")]
-        private static extern IDictionary<string, Action<EndpointConfiguration>> GetEndpointConfigurations(this KestrelConfigurationLoader loader);
-
         /// <summary>
         /// 用户的每个Endpoint配置代码
         /// </summary>
@@ -45,11 +34,6 @@ namespace Microsoft.AspNetCore.Hosting
         /// 从证书配置到证书链的缓存，避免为每个连接都从配置中重新加载证书链。
         /// </summary>
         private static readonly ConcurrentCache<CertificateConfigSection, X509Certificate2Collection?> _certificateChainCache = new();
-
-        /// <summary>
-        /// <see cref="HttpsConnectionAdapterOptions"/> 的 OnAuthenticate 回调构建器缓存
-        /// </summary>
-        private static readonly ConcurrentCache<HttpsConnectionAdapterOptions, AuthenticateBuilder> _authenticateBuilderCache = new();
 
         /// <summary>
         /// 通过 <see cref="HttpsConnectionAdapterOptions.ServerCertificateChain"/> 完全创建自定义服务器证书链。
@@ -75,7 +59,7 @@ namespace Microsoft.AspNetCore.Hosting
                 });
 
                 // 用户的 HTTPS 公共配置代码
-                var userHttpsDefaults = kestrel.GetHttpsDefaults();
+                var userHttpsDefaults = kestrel.HttpsDefaults;
                 kestrel.ConfigureHttpsDefaults(https =>
                 {
                     userHttpsDefaults.Invoke(https);
@@ -103,13 +87,13 @@ namespace Microsoft.AspNetCore.Hosting
         private static void ConfigureEndpointHttpsDefaults(this KestrelServerOptions kestrel, KestrelConfigurationLoader loader, Action<EndpointConfiguration> configureOptions)
         {
             // 用户的 Endpoint 公共配置代码
-            var userEndpointDefaults = kestrel.GetEndpointDefaults();
+            var userEndpointDefaults = kestrel.EndpointDefaults;
             kestrel.ConfigureEndpointDefaults(listener =>
             {
                 userEndpointDefaults.Invoke(listener);
 
                 // 把首次获取的每个 Endpoint 的配置缓存下来，后续每次配置 Endpoint 时都基于用户的原始配置进行重新创建
-                var endpointConfigurations = loader.GetEndpointConfigurations();
+                var endpointConfigurations = loader.EndpointConfigurations;
                 _userEndpointConfigurations ??= endpointConfigurations.ToFrozenDictionary();
 
                 foreach (var endpointSection in loader.Configuration.GetSection("Endpoints").GetChildren())
@@ -137,9 +121,8 @@ namespace Microsoft.AspNetCore.Hosting
         /// <exception cref="InvalidOperationException"></exception>
         private static void UseCustomServerCertificateChain(HttpsConnectionAdapterOptions https, IConfigurationSection certificateSession, ILogger logger)
         {
-            var builder = _authenticateBuilderCache.GetOrAdd(https, _ => new AuthenticateBuilder());
-            builder.UseUserAuthenticate(https.OnAuthenticate);
-            builder.UseCustomAuthenticate(next => (context, options) =>
+            var builder = https.AuthenticateBuilder;
+            builder.UseUserAuthenticate(https.OnAuthenticate, options =>
             {
                 if (options.ServerCertificateSelectionCallback != null)
                 {
@@ -148,7 +131,10 @@ namespace Microsoft.AspNetCore.Hosting
                     // 无法为所选服务器证书指定对应的 ServerCertificateChain，因此不能使用 UseCustomServerCertificateChain。
                     throw new InvalidOperationException($"已配置 {nameof(HttpsConnectionAdapterOptions.ServerCertificateSelector)}，因此不能使用 {nameof(UseCustomServerCertificateChain)}。");
                 }
+            });
 
+            builder.UseCustomAuthenticate(next => (context, options) =>
+            {
                 if (options.ServerCertificate is not X509Certificate2 serverCertificate)
                 {
                     throw new InvalidOperationException($"未配置 {nameof(HttpsConnectionAdapterOptions.ServerCertificate)}，因此不能使用 {nameof(UseCustomServerCertificateChain)}。");

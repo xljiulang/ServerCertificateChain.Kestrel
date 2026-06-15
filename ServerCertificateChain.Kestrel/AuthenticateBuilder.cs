@@ -7,27 +7,18 @@ namespace ServerCertificateChain.Kestrel
 {
     sealed class AuthenticateBuilder
     {
-        private readonly Action<ConnectionContext, SslServerAuthenticationOptions> _fallbackHandler;
+        private readonly Action<ConnectionContext, SslServerAuthenticationOptions> _fallbackHandler = (_, _) => { };
         private readonly List<Func<Action<ConnectionContext, SslServerAuthenticationOptions>, Action<ConnectionContext, SslServerAuthenticationOptions>>> _middlewares = [];
 
-        public AuthenticateBuilder()
-        {
-            this._fallbackHandler = (_, _) => { };
-        }
-
-        public AuthenticateBuilder(Action<ConnectionContext, SslServerAuthenticationOptions> fallbackOnAuthenticate)
-        {
-            this._fallbackHandler = fallbackOnAuthenticate;
-        }
-
-        public void UseUserAuthenticate(Action<ConnectionContext, SslServerAuthenticationOptions>? useOnAuthenticate)
+        public void UseUserAuthenticate(Action<ConnectionContext, SslServerAuthenticationOptions>? useOnAuthenticate, Action<SslServerAuthenticationOptions> configureOptions)
         {
             if (this._middlewares.Count == 0)
             {
-                this._middlewares.Add(next => (context, ssl) =>
+                this._middlewares.Add(next => (context, options) =>
                 {
-                    useOnAuthenticate?.Invoke(context, ssl);
-                    next.Invoke(context, ssl);
+                    useOnAuthenticate?.Invoke(context, options);
+                    configureOptions.Invoke(options);
+                    next.Invoke(context, options);
                 });
             }
         }
