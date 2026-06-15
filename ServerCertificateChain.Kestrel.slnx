@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Example/Example.csproj" />
+  <Project Path="ServerCertificateChain.Kestrel/ServerCertificateChain.Kestrel.csproj" Id="06551e82-0f55-440a-bfdd-bbb312bde7f5" />
+</Solution>
