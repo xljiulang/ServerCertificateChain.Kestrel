@@ -9,9 +9,9 @@ using System.Runtime.CompilerServices;
 namespace ServerCertificateChain.Kestrel
 {
     /// <summary>
-    /// 一些对象的数据扩展
+    /// kestrel的一些反射访问扩展方法
     /// </summary>
-    static class DataExtensions
+    static class KestrelReflectionExtensions
     {
         [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EndpointDefaults")]
         private static extern Action<ListenOptions> GetEndpointDefaults(KestrelServerOptions kestrel);

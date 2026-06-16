@@ -5,11 +5,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Primitives;
 using ServerCertificateChain.Kestrel;
 using System;
 using System.Collections.Frozen;
-using System.Linq;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
@@ -20,21 +18,6 @@ namespace Microsoft.AspNetCore.Hosting
     /// </summary>
     public static partial class WebHostBuilderExtensions
     {
-        /// <summary>
-        /// 用户的每个Endpoint配置代码
-        /// </summary>
-        private static FrozenDictionary<string, Action<EndpointConfiguration>>? _userEndpointConfigurations;
-
-        /// <summary>
-        /// 从叶子证书到证书上下文的缓存，避免为每个连接重复创建证书链上下文。
-        /// </summary>
-        private static readonly ConcurrentCache<X509Certificate2, SslStreamCertificateContext> _certificateContextCache = new();
-
-        /// <summary>
-        /// 从证书配置到证书链的缓存，避免为每个连接都从配置中重新加载证书链。
-        /// </summary>
-        private static readonly ConcurrentCache<CertificateConfigSection, X509Certificate2Collection?> _certificateChainCache = new();
-
         /// <summary>
         /// 通过 <see cref="HttpsConnectionAdapterOptions.ServerCertificateChain"/> 完全创建自定义服务器证书链。
         /// <para>* 规避 Kestrel 未加载配置中默认证书证书链的问题 https://github.com/dotnet/aspnetcore/pull/60710</para>
@@ -50,13 +33,6 @@ namespace Microsoft.AspNetCore.Hosting
                 kestrel.ConfigurationLoader ??= kestrel.Configure();
                 var configurationLoader = kestrel.ConfigurationLoader;
                 var logger = kestrel.ApplicationServices.GetService<ILoggerFactory>()?.CreateLogger("ServerCertificateChain.Kestrel") ?? NullLogger.Instance;
-
-                // 配置变更时清空缓存。
-                ChangeToken.OnChange(configurationLoader.Configuration.GetReloadToken, () =>
-                {
-                    _certificateChainCache.Clear();
-                    _certificateContextCache.Clear();
-                });
 
                 // 用户的 HTTPS 公共配置代码
                 var userHttpsDefaults = kestrel.HttpsDefaults;
@@ -88,6 +64,8 @@ namespace Microsoft.AspNetCore.Hosting
         {
             // 用户的 Endpoint 公共配置代码
             var userEndpointDefaults = kestrel.EndpointDefaults;
+            var _userEndpointConfigurations = default(FrozenDictionary<string, Action<EndpointConfiguration>>);
+
             kestrel.ConfigureEndpointDefaults(listener =>
             {
                 userEndpointDefaults.Invoke(listener);
@@ -140,75 +118,54 @@ namespace Microsoft.AspNetCore.Hosting
                     throw new InvalidOperationException($"未配置 {nameof(HttpsConnectionAdapterOptions.ServerCertificate)}，因此不能使用 {nameof(UseCustomServerCertificateChain)}。");
                 }
 
-                // 必须在 OnAuthenticate 回调中读取 ServerCertificateChain，而不是在 ConfigureHttpsDefaults 回调中读取。
-                var serverCertificateChain = https.ServerCertificateChain;
-                if (serverCertificateChain == null || serverCertificateChain.Count == 0)
+                var chain = https.ServerCertificateChain as X509Certificate2Chain;
+                if (chain == null)
                 {
-                    // https://github.com/dotnet/aspnetcore/pull/60710
-                    // Kestrel 问题 1（已在 ASP.NET Core 11 修复）：当终结点未配置证书而使用默认证书时，不会分配证书链，因此 serverCertificateChain == null。
-
-                    // https://github.com/dotnet/aspnetcore/blob/v10.0.9/src/Servers/Kestrel/Core/src/Internal/Certificates/CertificateConfigLoader.cs#L42
-                    // Kestrel 问题 2：当终结点下配置的是 bundle.pfx 之类的文件证书而不是 PEM 证书时，不会加载中间证书链，因此 serverCertificateChain.Count == 0。
-
-                    // 尝试从配置中加载服务器证书链，并回写到 https.ServerCertificateChain 以供后续使用。
-                    var cacheKey = new CertificateConfigSection(serverCertificate, certificateSession);
-                    serverCertificateChain = _certificateChainCache.GetOrAdd(cacheKey, section =>
-                    {
-                        var certificateChain = section.LoadCertificateChain();
-                        if (certificateChain != null)
-                        {
-                            Log.ServerCertificateChainLoaded(logger, serverCertificate.Subject, certificateSession.Path);
-                        }
-                        return certificateChain;
-                    });
-
-                    // 更新回 https.ServerCertificateChain，以便后续的连接有可能直接使用，从而避免从 _certificateChainCache 查找。
-                    https.ServerCertificateChain = serverCertificateChain;
+                    chain = CreateCertificate2Chain(serverCertificate, https.ServerCertificateChain, certificateSession, logger);
+                    https.ServerCertificateChain = chain;
                 }
 
-                if (serverCertificateChain == null || serverCertificateChain.Count == 0)
+                if (chain == null)
                 {
                     Log.ServerCertificateChainLoadFailed(logger, serverCertificate.Subject, certificateSession.Path);
                     next.Invoke(context, options);
                     return;
                 }
 
-                // 这里需要缓存以保证性能，因为每个客户端的连接都会创建新的 options 实例。
-                options.ServerCertificateContext = _certificateContextCache.GetOrAdd(serverCertificate, _ =>
+                if (chain.CertificateContext.IsValueCreated == false)
                 {
-                    var certificateContext = CreateCustomServerCertificateContext(serverCertificate, serverCertificateChain, options.ServerCertificateContext);
-                    Log.CustomServerCertificateContextCreated(logger, serverCertificate.Subject, certificateContext.IntermediateCertificates.Count);
-                    return certificateContext;
-                });
+                    Log.CustomServerCertificateContextCreated(logger, serverCertificate.Subject, chain.Count);
+                }
+                options.ServerCertificateContext = chain.CertificateContext.Value;
             });
 
             https.OnAuthenticate = builder.Build();
         }
 
-
-        /// <summary>
-        /// 创建一个使用自定义服务器证书链的 <see cref="SslStreamCertificateContext"/>。
-        /// </summary>
-        /// <param name="serverCertificate"></param>
-        /// <param name="serverCertificateChain"></param>
-        /// <param name="systemServerCertificateContext"></param>
-        /// <returns></returns>
-        private static SslStreamCertificateContext CreateCustomServerCertificateContext(
-            X509Certificate2 serverCertificate,
-            X509Certificate2Collection serverCertificateChain,
-            SslStreamCertificateContext? systemServerCertificateContext)
+        private static X509Certificate2Chain? CreateCertificate2Chain(
+            X509Certificate2 certificate,
+            X509Certificate2Collection? serverCertificateChain,
+            IConfigurationSection certificateSession,
+            ILogger logger)
         {
-            // 如果没有中间证书，则优先直接使用系统创建的证书上下文；如果没有，再创建一个由系统推断的新上下文。
-            if (serverCertificateChain.Any(i => i.Thumbprint != serverCertificate.Thumbprint) == false)
+            // https://github.com/dotnet/aspnetcore/pull/60710
+            // Kestrel 问题 1（已在 ASP.NET Core 11 修复）：当终结点未配置证书而使用默认证书时，不会分配证书链，因此 serverCertificateChain == null。
+
+            // https://github.com/dotnet/aspnetcore/blob/v10.0.9/src/Servers/Kestrel/Core/src/Internal/Certificates/CertificateConfigLoader.cs#L42
+            // Kestrel 问题 2：当终结点下配置的是 bundle.pfx 之类的文件证书而不是 PEM 证书时，不会加载中间证书链，因此 serverCertificateChain.Count == 0。
+            if (serverCertificateChain == null || serverCertificateChain.Count == 0)
             {
-                return systemServerCertificateContext ?? SslStreamCertificateContext.Create(serverCertificate, null);
+                var chain = X509Certificate2Chain.ParseFromConfigSection(certificate, certificateSession);
+                if (chain != null)
+                {
+                    Log.ServerCertificateChainLoaded(logger, certificate.Subject, certificateSession.Path);
+                }
+                return chain;
             }
 
-            // 无需检查 systemServerCertificateContext 中的中间证书链是否与 intermediateCertificates 匹配。
-            // 一切都以 intermediateCertificates 为准，因为它来自用户配置，生成的证书链应与用户配置保持一致。
-            var certificateTrust = SslCertificateTrust.CreateForX509Collection(serverCertificateChain);
-            return SslStreamCertificateContext.Create(serverCertificate, null, false, certificateTrust);
+            return new X509Certificate2Chain(certificate, serverCertificateChain);
         }
+
 
         private static partial class Log
         {
