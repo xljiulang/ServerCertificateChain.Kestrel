@@ -12,6 +12,7 @@
 var builder = WebApplication.CreateBuilder(args);
 
 // 添加此行代码，即可启用 Kestrel 文件证书的证书链功能
+// 注意这个行为与 Http3 监听冲突，意味着您不能开启 Http3
 builder.WebHost.UseKestrelCustomServerCertificateChain();
 
 builder.WebHost.ConfigureKestrel(k =>

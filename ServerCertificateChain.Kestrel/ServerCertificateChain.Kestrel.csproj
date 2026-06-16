@@ -5,8 +5,9 @@
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>
 		<Authors>laojiu</Authors>
-		<Version>1.0.0-beta1</Version>
+		<Version>1.0.0</Version>
 
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>

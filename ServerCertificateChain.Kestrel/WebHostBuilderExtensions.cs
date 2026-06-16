@@ -10,14 +10,13 @@ using System;
 using System.Collections.Frozen;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 
 namespace Microsoft.AspNetCore.Hosting
 {
     /// <summary>
     /// <see cref="HttpsConnectionAdapterOptions"/> 的扩展方法
     /// </summary>
-    public static partial class WebHostBuilderExtensions
+    public static class WebHostBuilderExtensions
     {
         /// <summary>
         /// 通过 <see cref="HttpsConnectionAdapterOptions.ServerCertificateChain"/> 完全创建自定义服务器证书链。
@@ -96,8 +95,8 @@ namespace Microsoft.AspNetCore.Hosting
         /// 通过 <see cref="HttpsConnectionAdapterOptions.ServerCertificateChain"/> 完全创建自定义服务器证书链。
         /// </summary>
         /// <param name="https"></param>
-        /// <param name="certificateSession"></param> 
-        /// <exception cref="InvalidOperationException"></exception>
+        /// <param name="certificateSession"></param>
+        /// <param name="logger"></param> 
         private static void UseCustomServerCertificateChain(HttpsConnectionAdapterOptions https, IConfigurationSection certificateSession, ILogger logger)
         {
             var builder = https.AuthenticateBuilder;
@@ -119,26 +118,26 @@ namespace Microsoft.AspNetCore.Hosting
                     throw new InvalidOperationException($"未配置 {nameof(HttpsConnectionAdapterOptions.ServerCertificate)}，因此不能使用 {nameof(UseCustomServerCertificateChain)}。");
                 }
 
-                var chain = https.ServerCertificateChain as X509Certificate2Chain;
-                if (chain == null)
+                var chain = default(X509Certificate2Chain);
+                lock (https)
                 {
-                    chain = CreateCertificate2Chain(serverCertificate, https.ServerCertificateChain, certificateSession, logger);
-                    https.ServerCertificateChain = chain;
+                    chain = https.ServerCertificateChain as X509Certificate2Chain;
+                    if (chain == null)
+                    {
+                        chain = CreateCertificate2Chain(serverCertificate, https.ServerCertificateChain, certificateSession, logger);
+                        https.ServerCertificateChain = chain;
+                    }
                 }
 
-                if (chain == null)
+                if (chain != null)
+                {
+                    options.ServerCertificateContext = chain.GetCertificateContext();
+                }
+                else
                 {
                     Log.ServerCertificateChainLoadFailed(logger, serverCertificate.Subject, certificateSession.Path);
                     next.Invoke(context, options);
-                    return;
                 }
-
-                if (chain.CertificateContext.IsValueCreated == false)
-                {
-                    Log.CustomServerCertificateContextCreated(logger, PrintCertificateContext(chain.CertificateContext.Value));
-                }
-
-                options.ServerCertificateContext = chain.CertificateContext.Value;
             });
 
             https.OnAuthenticate = builder.Build();
@@ -157,7 +156,7 @@ namespace Microsoft.AspNetCore.Hosting
             // Kestrel 问题 2：当终结点下配置的是 bundle.pfx 之类的文件证书而不是 PEM 证书时，不会加载中间证书链，因此 serverCertificateChain.Count == 0。
             if (serverCertificateChain == null || serverCertificateChain.Count == 0)
             {
-                var chain = X509Certificate2Chain.ParseFromConfigSection(certificate, certificateSession);
+                var chain = X509Certificate2Chain.ParseFromConfigSection(certificate, certificateSession, logger);
                 if (chain != null)
                 {
                     Log.ServerCertificateChainLoaded(logger, certificate.Subject, certificateSession.Path);
@@ -165,31 +164,7 @@ namespace Microsoft.AspNetCore.Hosting
                 return chain;
             }
 
-            return new X509Certificate2Chain(certificate, serverCertificateChain);
-        }
-
-        private static string PrintCertificateContext(SslStreamCertificateContext context)
-        {
-            var builder = new StringBuilder();
-
-            builder.AppendLine($"{context.TargetCertificate.Subject}, Thumbprint={context.TargetCertificate.Thumbprint}");
-            foreach (var item in context.IntermediateCertificates)
-            {
-                builder.AppendLine($"{item.Subject}, Thumbprint={item.Thumbprint}");
-            }
-            return builder.ToString();
-        }
-
-        private static partial class Log
-        {
-            [LoggerMessage(Level = LogLevel.Information, Message = "Successfully loaded the server certificate chain from '{endpointPath}' for '{serverCertificateSubject}'.")]
-            public static partial void ServerCertificateChainLoaded(ILogger logger, string serverCertificateSubject, string endpointPath);
-
-            [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load the server certificate chain from '{endpointPath}' for '{serverCertificateSubject}'.")]
-            public static partial void ServerCertificateChainLoadFailed(ILogger logger, string serverCertificateSubject, string endpointPath);
-
-            [LoggerMessage(Level = LogLevel.Information, Message = "Successfully created a custom certificate context '{certificateContext}")]
-            public static partial void CustomServerCertificateContextCreated(ILogger logger, string certificateContext);
+            return new X509Certificate2Chain(certificate, serverCertificateChain, logger);
         }
     }
 }
