@@ -100,7 +100,8 @@ namespace ServerCertificateChain.Kestrel
             }
 
             var certBytes = File.ReadAllBytes(certPath);
-            if (IsPfxFormat(certBytes))
+            var contentType = X509Certificate2.GetCertContentType(certBytes);
+            if (contentType == X509ContentType.Pfx)
             {
                 var certPassword = configurationSection.GetValue<string>(PasswordKey);
                 var collection = new X509Certificate2Collection();
@@ -118,11 +119,6 @@ namespace ServerCertificateChain.Kestrel
             }
 
             return null;
-
-            static bool IsPfxFormat(Span<byte> certBytes)
-            {
-                return certBytes.Length > 1 && certBytes[0] == 0x30 && certBytes[1] >= 0x80;
-            }
         }
 
         private static X509Certificate2Chain? CreateCertificate2Chain(
