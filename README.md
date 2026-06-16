@@ -4,9 +4,8 @@
 ### 如何使用
 
 #### 1 NUGET 包
-```
-
-```
+[ServerCertificateChain.Kestrel](https://www.nuget.org/packages/ServerCertificateChain.Kestrel)
+ 
 
 #### 2 配置 Kestrel
 ```c#

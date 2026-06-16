@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Security;
@@ -12,6 +13,7 @@ namespace ServerCertificateChain.Kestrel
     /// <summary>
     /// 表示一个服务器证书链，包含一个目标证书和零个或多个中间证书。
     /// </summary>
+    [DebuggerDisplay("TargetCertificate: {TargetCertificate.Subject}, IntermediateCertificates: {Count}")]
     sealed class X509Certificate2Chain : X509Certificate2Collection
     {
         private const string PathKey = "Path";

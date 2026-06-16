@@ -10,6 +10,7 @@ using System;
 using System.Collections.Frozen;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 namespace Microsoft.AspNetCore.Hosting
 {
@@ -134,8 +135,9 @@ namespace Microsoft.AspNetCore.Hosting
 
                 if (chain.CertificateContext.IsValueCreated == false)
                 {
-                    Log.CustomServerCertificateContextCreated(logger, serverCertificate.Subject, chain.Count);
+                    Log.CustomServerCertificateContextCreated(logger, PrintCertificateContext(chain.CertificateContext.Value));
                 }
+
                 options.ServerCertificateContext = chain.CertificateContext.Value;
             });
 
@@ -166,6 +168,17 @@ namespace Microsoft.AspNetCore.Hosting
             return new X509Certificate2Chain(certificate, serverCertificateChain);
         }
 
+        private static string PrintCertificateContext(SslStreamCertificateContext context)
+        {
+            var builder = new StringBuilder();
+
+            builder.AppendLine($"{context.TargetCertificate.Subject}, Thumbprint={context.TargetCertificate.Thumbprint}");
+            foreach (var item in context.IntermediateCertificates)
+            {
+                builder.AppendLine($"{item.Subject}, Thumbprint={item.Thumbprint}");
+            }
+            return builder.ToString();
+        }
 
         private static partial class Log
         {
@@ -175,8 +188,8 @@ namespace Microsoft.AspNetCore.Hosting
             [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load the server certificate chain from '{endpointPath}' for '{serverCertificateSubject}'.")]
             public static partial void ServerCertificateChainLoadFailed(ILogger logger, string serverCertificateSubject, string endpointPath);
 
-            [LoggerMessage(Level = LogLevel.Information, Message = "Successfully created a custom certificate context for '{serverCertificateSubject}' with {intermediateCertificateCount} intermediate certificates.")]
-            public static partial void CustomServerCertificateContextCreated(ILogger logger, string serverCertificateSubject, int intermediateCertificateCount);
+            [LoggerMessage(Level = LogLevel.Information, Message = "Successfully created a custom certificate context '{certificateContext}")]
+            public static partial void CustomServerCertificateContextCreated(ILogger logger, string certificateContext);
         }
     }
 }

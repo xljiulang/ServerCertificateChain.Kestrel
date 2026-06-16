@@ -4,10 +4,18 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>
+		<Authors>laojiu</Authors>
+		<Version>1.0.0-beta1</Version>
+
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/xljiulang/ServerCertificateChain.Kestrel</PackageProjectUrl>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-		<None Include="..\README.md" Link="README.md" />
+		<None Include="..\README.md" Link="README.md" Pack="true" PackagePath="/"/>
 	</ItemGroup>
 </Project>
