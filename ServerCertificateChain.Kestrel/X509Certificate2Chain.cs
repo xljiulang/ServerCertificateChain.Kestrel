@@ -48,15 +48,15 @@ namespace ServerCertificateChain.Kestrel
 
         private SslStreamCertificateContext CreateCertificateContext()
         {
-            if (this.Count == 0)
+            if (this.Any(i => i.Thumbprint != this.TargetCertificate.Thumbprint))
             {
-                SslStreamCertificateContext.Create(this.TargetCertificate, null);
+                var certificateTrust = SslCertificateTrust.CreateForX509Collection(this);
+                var context = SslStreamCertificateContext.Create(this.TargetCertificate, this, false, certificateTrust);
+                this.LogCertificateContext(context);
+                return context;
             }
 
-            var certificateTrust = SslCertificateTrust.CreateForX509Collection(this);
-            var context = SslStreamCertificateContext.Create(this.TargetCertificate, this, false, certificateTrust);
-            this.LogCertificateContext(context);
-            return context;
+            return SslStreamCertificateContext.Create(this.TargetCertificate, null);
         }
 
         private void LogCertificateContext(SslStreamCertificateContext context)
