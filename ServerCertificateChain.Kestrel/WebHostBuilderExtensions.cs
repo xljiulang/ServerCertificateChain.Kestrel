@@ -5,9 +5,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using ServerCertificateChain.Kestrel;
 using System;
 using System.Collections.Frozen;
+using System.Linq;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
@@ -28,29 +30,40 @@ namespace Microsoft.AspNetCore.Hosting
         /// <returns></returns>
         public static IWebHostBuilder UseKestrelCustomServerCertificateChain(this IWebHostBuilder builder)
         {
-            builder.ConfigureServices(services => services.PostConfigure<KestrelServerOptions>(kestrel =>
+            builder.ConfigureServices(services =>
             {
-                kestrel.ConfigurationLoader ??= kestrel.Configure();
-                var configurationLoader = kestrel.ConfigurationLoader;
-                var logger = kestrel.ApplicationServices.GetService<ILoggerFactory>()?.CreateLogger("ServerCertificateChain.Kestrel") ?? NullLogger.Instance;
-
-                // 用户的 HTTPS 公共配置代码
-                var userHttpsDefaults = kestrel.HttpsDefaults;
-                kestrel.ConfigureHttpsDefaults(https =>
+                var descriptor = services.FirstOrDefault(i => i.ImplementationInstance is KestrelPostConfigureOptions);
+                if (descriptor != null)
                 {
-                    userHttpsDefaults.Invoke(https);
+                    services.Remove(descriptor);
+                }
 
-                    var defaultCertificateSession = configurationLoader.Configuration.GetSection("Certificates:Default");
-                    UseCustomServerCertificateChain(https, defaultCertificateSession, logger);
-                });
-
-                // 为各个终结点配置 HTTPS 默认值。
-                kestrel.ConfigureEndpointHttpsDefaults(configurationLoader, endpont =>
+                descriptor = ServiceDescriptor.Singleton<IPostConfigureOptions<KestrelServerOptions>>(new KestrelPostConfigureOptions(kestrel =>
                 {
-                    var endpointCertificateSession = endpont.ConfigSection.GetSection("Certificate");
-                    UseCustomServerCertificateChain(endpont.HttpsOptions, endpointCertificateSession, logger);
-                });
-            }));
+                    kestrel.ConfigurationLoader ??= kestrel.Configure();
+                    var configurationLoader = kestrel.ConfigurationLoader;
+                    var logger = kestrel.ApplicationServices.GetService<ILoggerFactory>()?.CreateLogger("ServerCertificateChain.Kestrel") ?? NullLogger.Instance;
+
+                    // 用户的 HTTPS 公共配置代码
+                    var userHttpsDefaults = kestrel.HttpsDefaults;
+                    kestrel.ConfigureHttpsDefaults(https =>
+                    {
+                        userHttpsDefaults.Invoke(https);
+
+                        var defaultCertificateSession = configurationLoader.Configuration.GetSection("Certificates:Default");
+                        UseCustomServerCertificateChain(https, defaultCertificateSession, logger);
+                    });
+
+                    // 为各个终结点配置 HTTPS 默认值。
+                    kestrel.ConfigureEndpointHttpsDefaults(configurationLoader, endpont =>
+                    {
+                        var endpointCertificateSession = endpont.ConfigSection.GetSection("Certificate");
+                        UseCustomServerCertificateChain(endpont.HttpsOptions, endpointCertificateSession, logger);
+                    });
+                }));
+
+                services.Add(descriptor);
+            });
             return builder;
         }
 
