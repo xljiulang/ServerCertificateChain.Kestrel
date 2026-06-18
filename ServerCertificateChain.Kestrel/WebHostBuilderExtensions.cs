@@ -43,6 +43,7 @@ namespace Microsoft.AspNetCore.Hosting
                     kestrel.ConfigurationLoader ??= kestrel.Configure();
                     var configurationLoader = kestrel.ConfigurationLoader;
                     var logger = kestrel.ApplicationServices.GetService<ILoggerFactory>()?.CreateLogger("ServerCertificateChain.Kestrel") ?? NullLogger.Instance;
+                    var contentRootPath = kestrel.ApplicationServices.GetRequiredService<IWebHostEnvironment>().ContentRootPath ;
 
                     // 用户的 HTTPS 公共配置代码
                     var userHttpsDefaults = kestrel.HttpsDefaults;
@@ -51,14 +52,14 @@ namespace Microsoft.AspNetCore.Hosting
                         userHttpsDefaults.Invoke(https);
 
                         var defaultCertificateSession = configurationLoader.Configuration.GetSection("Certificates:Default");
-                        UseCustomServerCertificateChain(https, defaultCertificateSession, logger);
+                        UseCustomServerCertificateChain(https, defaultCertificateSession, contentRootPath, logger);
                     });
 
                     // 为各个终结点配置 HTTPS 默认值。
                     kestrel.ConfigureEndpointHttpsDefaults(configurationLoader, endpont =>
                     {
                         var endpointCertificateSession = endpont.ConfigSection.GetSection("Certificate");
-                        UseCustomServerCertificateChain(endpont.HttpsOptions, endpointCertificateSession, logger);
+                        UseCustomServerCertificateChain(endpont.HttpsOptions, endpointCertificateSession, contentRootPath, logger);
                     });
                 }));
 
@@ -109,8 +110,9 @@ namespace Microsoft.AspNetCore.Hosting
         /// </summary>
         /// <param name="https"></param>
         /// <param name="certificateSession"></param>
+        /// <param name="contentRootPath"></param>
         /// <param name="logger"></param> 
-        private static void UseCustomServerCertificateChain(HttpsConnectionAdapterOptions https, IConfigurationSection certificateSession, ILogger logger)
+        private static void UseCustomServerCertificateChain(HttpsConnectionAdapterOptions https, IConfigurationSection certificateSession, string contentRootPath, ILogger logger)
         {
             var builder = https.AuthenticateBuilder;
             builder.UseUserAuthenticate(https.OnAuthenticate, options =>
@@ -137,7 +139,7 @@ namespace Microsoft.AspNetCore.Hosting
                     chain = https.ServerCertificateChain as X509Certificate2Chain;
                     if (chain == null)
                     {
-                        chain = CreateCertificate2Chain(serverCertificate, https.ServerCertificateChain, certificateSession, logger);
+                        chain = CreateCertificate2Chain(serverCertificate, https.ServerCertificateChain, certificateSession,contentRootPath, logger);
                         https.ServerCertificateChain = chain;
                     }
                 }
@@ -160,6 +162,7 @@ namespace Microsoft.AspNetCore.Hosting
             X509Certificate2 certificate,
             X509Certificate2Collection? serverCertificateChain,
             IConfigurationSection certificateSession,
+            string contentRootPath,
             ILogger logger)
         {
             // https://github.com/dotnet/aspnetcore/pull/60710
@@ -169,7 +172,7 @@ namespace Microsoft.AspNetCore.Hosting
             // Kestrel 问题 2：当终结点下配置的是 bundle.pfx 之类的文件证书而不是 PEM 证书时，不会加载中间证书链，因此 serverCertificateChain.Count == 0。
             if (serverCertificateChain == null || serverCertificateChain.Count == 0)
             {
-                var chain = X509Certificate2Chain.ParseFromConfigSection(certificate, certificateSession, logger);
+                var chain = X509Certificate2Chain.ParseFromConfigSection(certificate, certificateSession,contentRootPath, logger);
                 if (chain != null)
                 {
                     Log.ServerCertificateChainLoaded(logger, certificate.Subject, certificateSession.Path);

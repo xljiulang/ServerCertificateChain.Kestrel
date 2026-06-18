@@ -86,15 +86,23 @@ namespace ServerCertificateChain.Kestrel
         /// </summary>
         /// <param name="targetCertificate">目标（叶子）证书</param>
         /// <param name="configurationSection">证书的配置节</param>
+        /// <param name="contentRootPath"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
         public static X509Certificate2Chain? ParseFromConfigSection(
             X509Certificate2 targetCertificate,
             IConfigurationSection configurationSection,
+            string contentRootPath,
             ILogger logger)
         {
             var certPath = configurationSection.GetValue<string>(PathKey);
-            if (certPath == null || File.Exists(certPath) == false)
+            if (string.IsNullOrEmpty(certPath))
+            {
+                return null;
+            }
+
+            certPath = Path.Combine(contentRootPath, certPath);
+            if (File.Exists(certPath) == false)
             {
                 return null;
             }
